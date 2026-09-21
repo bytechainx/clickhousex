@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)]
 //! 不可达地址必须返回 `Err`（127.0.0.1:1 必然拒绝连接）。
 
 use std::time::Duration;
