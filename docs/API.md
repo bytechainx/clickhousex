@@ -27,7 +27,7 @@
 | `query_text(sql)` | 返回原始响应文本 |
 | `insert_json_each_row(table, rows)` | 写入 `JSONEachRow`（每行必须是 JSON object） |
 | `insert_batch(table, rows, options)` | 分块批量写入，每个分块一次独立 HTTP 请求 |
-| `stats()` / `is_closed()` / `close()` / `config()` | 运行时状态与生命周期 |
+| `stats()` / `is_closed()` / `close()` / `config()` | 运行时状态与生命周期；`close()` 拒绝新请求并等待在途操作结束后返回（幂等） |
 
 ## 最小用法
 
