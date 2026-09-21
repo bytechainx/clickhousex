@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 三类测试基线（特性 002）：`tests/tdd_contracts.rs`（逐公开入口的行为契约，头部
+  `TDD-PROBE` 表登记「入口 / 变异 / 红 / 绿」）、`tests/sdd_spec.rs`（`docs/标准.md`
+  全部 `##` 章节 1:1 对照的可执行断言）、`tests/aidd_boundary.rs`（AI 生成、人工复核
+  后保留的边界用例）。三者全部离线运行，不依赖真实服务。
+- live 真连服用例 `tests/live_clickhouse.rs`（全部 `#[ignore]`，默认不参与 CI；
+  凭据只读 `FOUNDATIONX_CLICKHOUSEX_*`，流程为建连 → 探活 → 唯一化建表 → 批量写 →
+  查询 → 删表并断言清理生效 → close）。
+
 ## [0.1.0] - 2026-09-21
 
 ### 新增
