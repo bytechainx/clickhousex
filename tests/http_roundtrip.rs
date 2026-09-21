@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)]
 //! 基于本地一次性 HTTP 服务的数据面行为：请求次数、认证方式、错误映射与统计计数。
 //!
 //! 这些用例不依赖真实 ClickHouse，只驱动 HTTP 协议层面可验证的合同。

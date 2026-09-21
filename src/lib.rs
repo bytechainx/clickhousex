@@ -69,6 +69,15 @@
 //! 环境变量前缀为 `FOUNDATIONX_CLICKHOUSEX_`，可用常量（如
 //! [`ENV_HOST`](crate::ENV_HOST)）避免硬编码字符串。
 
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable
+    )
+)]
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 

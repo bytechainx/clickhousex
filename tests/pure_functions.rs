@@ -1,3 +1,9 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable
+)]
 //! 纯函数行为：TabSeparated 解析、分块、URL 构造与错误可重试判定。
 
 use clickhousex::{
