@@ -1,0 +1,27 @@
+[package]
+name = "clickhousex"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Async ClickHouse HTTP client with pooled backpressure, batch inserts and health checks"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bytechainx/clickhousex"
+homepage = "https://github.com/bytechainx/clickhousex"
+documentation = "https://github.com/bytechainx/clickhousex#readme"
+readme = "README.md"
+keywords = ["clickhouse", "database", "client", "async", "analytics"]
+categories = ["database", "asynchronous"]
+include = ["src/**/*", "tests/**/*", "examples/**/*", "README.md", "LICENSE-*", "Cargo.toml"]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+toml = "0.8"
+tracing = "0.1"
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util"] }
