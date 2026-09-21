@@ -22,6 +22,8 @@ use clickhousex::{
     ClickHouseConfigBuilder, ClickHouseError, DEFAULT_DATABASE, DEFAULT_HTTP_PORT, DEFAULT_USER,
     ENV_DATABASE, ENV_HOST, ENV_HTTP_PORT, ENV_PASSWORD, ENV_PORT, ENV_PREFIX, ENV_USER,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 /// 环境变量是进程级全局状态，串行化所有会读写 env 的用例。
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -48,6 +50,44 @@ fn remote_with_tls() -> ClickHouseConfig {
         tls: true,
         ..Default::default()
     }
+}
+
+/// 指向本地一次性桩的配置。
+fn local_config(port: u16) -> ClickHouseConfig {
+    ClickHouseConfig::builder()
+        .host("127.0.0.1")
+        .http_port(port)
+        .database("analytics")
+        .timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(5))
+        .max_in_flight(1)
+        .build()
+        .expect("测试配置必须有效")
+}
+
+/// 一次性本地 HTTP 桩：对 1 次请求返回指定状态码与正文。
+async fn spawn_error_mock(
+    status: u16,
+    reason: &'static str,
+    body: &'static str,
+) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("绑定临时端口");
+    let port = listener.local_addr().expect("读取临时端口").port();
+    let handle = tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut buffer = [0_u8; 2048];
+            let _ = stream.read(&mut buffer).await;
+            let response = format!(
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.shutdown().await;
+        }
+    });
+    (port, handle)
 }
 
 /// S-1：只覆盖 HTTP 协议与连接生命周期；两种并发入口语义分明，零领域模型。
@@ -131,8 +171,8 @@ fn assert_field_governance() {
 }
 
 /// S-3：远程明文 HTTP fail-closed；错误不回显正文；TLS 与 mTLS 约束成对生效。
-#[test]
-fn assert_security_conventions() {
+#[tokio::test]
+async fn assert_security_conventions() {
     // 非 loopback 明文 HTTP 在建立连接前被拒绝。
     let remote = ClickHouseConfig {
         host: "clickhouse.example.com".into(),
@@ -142,13 +182,34 @@ fn assert_security_conventions() {
     assert!(error.to_string().contains("HTTPS"));
 
     // 错误只保留 HTTP 状态码与 ClickHouse 数字错误码，不回显正文 / SQL / 凭据。
-    let leaked = "payload=secret-value SELECT private_column";
-    let mapped = ClickHouseError::Backend(
-        "HTTP 400 Bad Request（server_code=60，响应正文已省略）".to_owned(),
+    // 这里走真实映射路径（本地一次性 HTTP 桩返回 400 + 夹带正文），而非手工构造错误值。
+    let leaked_body =
+        "Code: 60. DB::Exception: UNKNOWN_TABLE; payload=secret-value SELECT private_column";
+    let (port, server) = spawn_error_mock(400, "Bad Request", leaked_body).await;
+    let client = ClickHouseClient::new(local_config(port)).expect("构造客户端");
+    let error = client
+        .query("SELECT private_column FROM missing")
+        .await
+        .expect_err("非 2xx 必须失败");
+    let message = error.to_string();
+    assert!(
+        matches!(error, ClickHouseError::Backend(_)),
+        "业务错误应映射为 Backend，实际 {error:?}"
     );
-    assert!(mapped.to_string().contains("server_code=60"));
-    assert!(!mapped.to_string().contains(leaked), "错误不得回显响应正文");
-    assert!(!mapped.is_retryable());
+    assert!(
+        message.contains("server_code=60"),
+        "错误应保留 ClickHouse 数字错误码: {message}"
+    );
+    assert!(
+        !message.contains("secret-value"),
+        "错误不得回显响应正文: {message}"
+    );
+    assert!(
+        !message.contains("private_column"),
+        "错误不得回显 SQL 片段: {message}"
+    );
+    assert!(!error.is_retryable());
+    server.await.expect("mock 服务任务");
 
     // 自定义 CA 仅在 tls = true 时允许；mTLS 证书与私钥必须成对提供。
     let ca_without_tls = ClickHouseConfig {
