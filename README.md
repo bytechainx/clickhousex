@@ -1,9 +1,8 @@
 # clickhousex
 
-[![Crates.io](https://img.shields.io/crates/v/clickhousex.svg)](https://crates.io/crates/clickhousex)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-`clickhousex` 是一个可独立发布的 **ClickHouse HTTP 客户端库**（默认端口 `8123`），
+`clickhousex` 是一个零内部耦合的 **ClickHouse HTTP 客户端库**（默认端口 `8123`），
 基于 `reqwest`（rustls）实现，提供连接复用、并发背压、查询、批量写入、认证、
 超时与健康检查等基础设施原语。
 
@@ -17,8 +16,11 @@
 
 ## 安装
 
-```bash
-cargo add clickhousex
+本 crate **不发布到 crates.io**，通过 git 依赖引入：
+
+```toml
+[dependencies]
+clickhousex = { git = "https://github.com/bytechainx/clickhousex" }
 ```
 
 ## 最小可运行示例

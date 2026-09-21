@@ -7,7 +7,7 @@ description = "Async ClickHouse HTTP client with pooled backpressure, batch inse
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bytechainx/clickhousex"
 homepage = "https://github.com/bytechainx/clickhousex"
-documentation = "https://docs.rs/clickhousex"
+documentation = "https://github.com/bytechainx/clickhousex#readme"
 readme = "README.md"
 keywords = ["clickhouse", "database", "client", "async", "analytics"]
 categories = ["database", "asynchronous"]
@@ -25,7 +25,3 @@ url = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util"] }
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
