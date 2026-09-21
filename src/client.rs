@@ -505,6 +505,21 @@ impl Inner {
 /// 解析 ClickHouse 默认 `TabSeparated` 文本为行列。
 ///
 /// 跳过空行；按 tab 分列。纯函数。
+///
+/// # Examples
+///
+/// ```
+/// use clickhousex::parse_tab_separated_rows;
+///
+/// let rows = parse_tab_separated_rows("id\tname\n1\tfoo\n\n");
+/// assert_eq!(
+///     rows,
+///     vec![
+///         vec!["id".to_owned(), "name".to_owned()],
+///         vec!["1".to_owned(), "foo".to_owned()],
+///     ]
+/// );
+/// ```
 #[must_use]
 pub fn parse_tab_separated_rows(text: &str) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
