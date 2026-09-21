@@ -273,10 +273,9 @@ macro_rules! impl_connection_api {
                 self.inner.is_closed()
             }
 
-            /// 关闭：拒绝后续请求并释放并发额度（连接由 `Drop` 回收）。
+            /// 关闭：拒绝后续请求，等待在途操作结束后返回（连接由 `Drop` 回收）。
             pub async fn close(&self) -> ClickHouseResult<()> {
-                self.inner.close();
-                Ok(())
+                self.inner.close().await
             }
 
             /// 当前配置（密码已脱敏，仅 `Debug` 可见 `***`）。
@@ -364,10 +363,24 @@ impl Inner {
         }
     }
 
-    fn close(&self) {
+    /// 关闭：置关闭位以拒绝新请求，并等待在途操作释放完全部额度后返回。
+    ///
+    /// 新请求由 `closed` 位在 [`Inner::ensure_open`] 处立即拒绝，因此**不**关闭信号量：
+    /// 在途操作各自持有 1 个额度、完成时释放，「取回全部额度」即等价于「在途操作已
+    /// 全部结束」。等待上界由在途请求自身的超时（`config.timeout`）隐式给出。
+    ///
+    /// 幂等：无在途操作时立即返回，重复调用同样成功。
+    async fn close(&self) -> ClickHouseResult<()> {
         self.closed.store(true, Ordering::SeqCst);
-        // 关闭信号量，使后续 acquire 立即失败。
-        self.sem.close();
+        let permits = u32::try_from(self.total).unwrap_or(u32::MAX);
+        let all_permits = self
+            .sem
+            .clone()
+            .acquire_many_owned(permits)
+            .await
+            .map_err(|_| ClickHouseError::Closed("背压信号量已关闭".to_owned()))?;
+        drop(all_permits);
+        Ok(())
     }
 
     fn ensure_open(&self) -> ClickHouseResult<()> {
