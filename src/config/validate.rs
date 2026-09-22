@@ -48,6 +48,8 @@ impl ClickHouseConfig {
                 "远程 ClickHouse 必须使用 HTTPS（如需明文 HTTP 请显式配置允许名单）".to_owned(),
             ));
         }
+        // 重试配置 fail-fast：非法预算（超上界/零延迟/max<initial）在建立连接前拒绝
+        self.retry.validate()?;
         Ok(())
     }
 }

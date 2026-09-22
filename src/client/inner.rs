@@ -20,6 +20,7 @@ use super::transport::{
 use super::{ClickHouseHealth, ClickHousePoolStats, Inner};
 use crate::config::ClickHouseConfig;
 use crate::error::{ClickHouseError, ClickHouseResult};
+use crate::retry::execute_with_retry;
 
 impl Inner {
     pub(super) fn new(config: ClickHouseConfig, permits: usize) -> ClickHouseResult<Self> {
@@ -117,7 +118,7 @@ impl Inner {
     }
 
     pub(super) async fn ping(&self) -> ClickHouseResult<()> {
-        let body = self.post_query("SELECT 1", None, &[]).await?;
+        let body = self.post_query_read("SELECT 1", &[]).await?;
         if body.trim() != "1" {
             return Err(ClickHouseError::Backend(
                 "ping 响应不符合协议（响应正文已省略）".to_owned(),
@@ -131,7 +132,7 @@ impl Inner {
         let healthy = self.ping().await.is_ok();
         let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let version = if healthy {
-            self.post_query("SELECT version()", None, &[])
+            self.post_query_read("SELECT version()", &[])
                 .await
                 .ok()
                 .map(|text| text.trim().to_owned())
@@ -163,6 +164,26 @@ impl Inner {
             self.error.fetch_add(1, Ordering::Relaxed);
         }
         outcome
+    }
+
+    /// 只读查询路径：按 `config.retry` 的重试预算包装 `post_query`。
+    ///
+    /// 仅供 `query` / `query_text` / `query_with_params` 与 `ping` /
+    /// `health_check` 等读操作使用；写操作（`execute` / `insert_batch` 等）
+    /// **不**走本路径（R-RT-031：非幂等写默认不重试）。`enabled = false`
+    /// 时短路为单次执行，不消耗任何重试预算。
+    pub(super) async fn post_query_read(
+        &self,
+        sql: &str,
+        params: &[(&str, &str)],
+    ) -> ClickHouseResult<String> {
+        if !self.config.retry.enabled {
+            return self.post_query(sql, None, params).await;
+        }
+        execute_with_retry(&self.config.retry, "clickhouse.query", || {
+            self.post_query(sql, None, params)
+        })
+        .await
     }
 
     async fn post_query_inner(

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use clickhousex::{
     BatchInsertOptions, ClickHouseClient, ClickHouseConfig, ClickHouseError, ClickHousePool,
-    ClickHousePoolStats,
+    ClickHousePoolStats, RetryConfig,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -110,6 +110,16 @@ fn config_for(port: u16) -> ClickHouseConfig {
         .max_in_flight(4)
         .build()
         .expect("测试配置必须有效")
+}
+
+/// 关闭重试的配置变体：状态码映射类用例只验证错误分类，
+/// 需与读路径的默认重试行为隔离（否则可重试状态码会触发多次请求）。
+fn retry_disabled(mut config: ClickHouseConfig) -> ClickHouseConfig {
+    config.retry = RetryConfig {
+        enabled: false,
+        ..Default::default()
+    };
+    config
 }
 
 fn rows(count: usize) -> Vec<serde_json::Value> {
@@ -358,7 +368,7 @@ async fn http_status_mapping_decides_retryability() {
     for (response, retryable) in error_cases {
         let status = response.status;
         let (port, server) = spawn_mock(vec![response]).await;
-        let client = ClickHouseClient::new(config_for(port)).expect("构造客户端");
+        let client = ClickHouseClient::new(retry_disabled(config_for(port))).expect("构造客户端");
         let error = client.query("SELECT 1").await.expect_err("非 2xx 必须失败");
         assert_eq!(
             error.is_retryable(),

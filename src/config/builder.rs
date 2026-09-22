@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::error::ClickHouseResult;
+use crate::retry::RetryConfig;
 
 use super::{ClickHouseConfig, ClickHouseConfigBuilder};
 
@@ -133,6 +134,13 @@ impl ClickHouseConfigBuilder {
     #[must_use]
     pub fn auth_in_url(mut self, enabled: bool) -> Self {
         self.inner.auth_in_url = enabled;
+        self
+    }
+
+    /// 设置重试策略（仅查询/连接类只读路径生效；写操作默认不重试）。
+    #[must_use]
+    pub fn retry(mut self, retry: RetryConfig) -> Self {
+        self.inner.retry = retry;
         self
     }
 

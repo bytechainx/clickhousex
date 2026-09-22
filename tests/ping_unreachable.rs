@@ -8,8 +8,12 @@
 
 use std::time::Duration;
 
-use clickhousex::{ClickHouseClient, ClickHouseConfig, ClickHouseError, ClickHousePool};
+use clickhousex::{
+    ClickHouseClient, ClickHouseConfig, ClickHouseError, ClickHousePool, RetryConfig,
+};
 
+/// 不可达配置：显式关闭重试，让本文件的用例聚焦「失败传播 + 统计计数」本身；
+/// 读路径默认重试行为的端到端验证见 `src/client.rs` 单元测试（error == 4）。
 fn unreachable_config() -> ClickHouseConfig {
     ClickHouseConfig::builder()
         .host("127.0.0.1")
@@ -17,6 +21,10 @@ fn unreachable_config() -> ClickHouseConfig {
         .timeout(Duration::from_millis(300))
         .acquire_timeout(Duration::from_millis(300))
         .max_in_flight(2)
+        .retry(RetryConfig {
+            enabled: false,
+            ..Default::default()
+        })
         .build()
         .expect("测试配置必须有效")
 }
