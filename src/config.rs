@@ -155,16 +155,6 @@ impl fmt::Debug for ClickHouseConfig {
 }
 
 impl ClickHouseConfig {
-    /// 从环境变量加载（前缀 `FOUNDATIONX_CLICKHOUSEX_`），未设置项使用默认值。
-    ///
-    /// 加载后立即 [`validate`](Self::validate)。
-    pub fn from_env() -> ClickHouseResult<Self> {
-        let mut config = Self::default();
-        config.apply_env_overrides()?;
-        config.validate()?;
-        Ok(config)
-    }
-
     /// 从 TOML 文本解析并校验（**不**读取环境变量，便于确定性测试）。
     ///
     /// 期望结构为 `schema_version = 1` + 扁平字段；`password` 只允许空占位，
@@ -214,48 +204,6 @@ impl ClickHouseConfig {
         Self::from_toml(&text)
     }
 
-    /// 校验配置合法性（建立连接前 fail-fast）。
-    pub fn validate(&self) -> ClickHouseResult<()> {
-        if self.max_in_flight < 1 {
-            return Err(ClickHouseError::Config("max_in_flight 必须 ≥ 1".to_owned()));
-        }
-        if self.timeout.is_zero() || self.acquire_timeout.is_zero() {
-            return Err(ClickHouseError::Config(
-                "timeout 与 acquire_timeout 必须大于零".to_owned(),
-            ));
-        }
-        if self
-            .connect_timeout
-            .is_some_and(|timeout| timeout.is_zero())
-        {
-            return Err(ClickHouseError::Config(
-                "connect_timeout 必须大于零".to_owned(),
-            ));
-        }
-        if self.host.trim().is_empty() || self.http_port == 0 {
-            return Err(ClickHouseError::Config("host/port 非法".to_owned()));
-        }
-        if self.tls_ca_file.is_some() && !self.tls {
-            return Err(ClickHouseError::Config(
-                "配置 tls_ca_file 时必须启用 tls".to_owned(),
-            ));
-        }
-        match (&self.tls_client_cert_file, &self.tls_client_key_file) {
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(ClickHouseError::Config(
-                    "tls_client_cert_file 与 tls_client_key_file 必须同时配置".to_owned(),
-                ));
-            }
-            _ => {}
-        }
-        if !self.tls && !host_is_loopback(&self.host) && !host_allows_plain_http(&self.host) {
-            return Err(ClickHouseError::Config(
-                "远程 ClickHouse 必须使用 HTTPS（如需明文 HTTP 请显式配置允许名单）".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
     /// 链式构建器入口。
     #[must_use]
     pub fn builder() -> ClickHouseConfigBuilder {
@@ -268,56 +216,6 @@ impl ClickHouseConfig {
         let scheme = if self.tls { "https" } else { "http" };
         format!("{scheme}://{}:{}", self.host, self.http_port)
     }
-
-    /// 从环境变量覆盖当前配置（env 值优先于结构体已有值）。
-    fn apply_env_overrides(&mut self) -> ClickHouseResult<()> {
-        if let Some(value) = env_non_empty(ENV_HOST) {
-            self.host = value;
-        }
-        let http_port = env_parsed::<u16>(ENV_HTTP_PORT)?;
-        let port_alias = env_parsed::<u16>(ENV_PORT)?;
-        self.http_port = resolve_http_port(http_port, port_alias, self.http_port)?;
-        if let Some(value) = env_bool(ENV_TLS)? {
-            self.tls = value;
-        }
-        if let Some(value) = env_trimmed(ENV_TLS_CA_FILE) {
-            self.tls_ca_file = Some(PathBuf::from(value));
-        }
-        if let Some(value) = env_trimmed(ENV_TLS_CLIENT_CERT_FILE) {
-            self.tls_client_cert_file = Some(PathBuf::from(value));
-        }
-        if let Some(value) = env_trimmed(ENV_TLS_CLIENT_KEY_FILE) {
-            self.tls_client_key_file = Some(PathBuf::from(value));
-        }
-        if let Some(value) = env_non_empty(ENV_USER) {
-            self.user = value;
-        }
-        if let Ok(value) = std::env::var(ENV_PASSWORD) {
-            self.password = value;
-        }
-        if let Some(value) = env_non_empty(ENV_DATABASE) {
-            self.database = value;
-        }
-        if let Some(value) = env_parsed::<u64>(ENV_TIMEOUT_MS)? {
-            self.timeout = Duration::from_millis(value);
-        }
-        if let Some(value) = env_parsed::<u64>(ENV_CONNECT_TIMEOUT_MS)? {
-            self.connect_timeout = Some(Duration::from_millis(value));
-        }
-        if let Some(value) = env_parsed::<usize>(ENV_MAX_IDLE_PER_HOST)? {
-            self.max_idle_per_host = value;
-        }
-        if let Some(value) = env_parsed::<usize>(ENV_MAX_IN_FLIGHT)? {
-            self.max_in_flight = value;
-        }
-        if let Some(value) = env_parsed::<u64>(ENV_ACQUIRE_TIMEOUT_MS)? {
-            self.acquire_timeout = Duration::from_millis(value);
-        }
-        if let Some(value) = env_bool(ENV_AUTH_IN_URL)? {
-            self.auth_in_url = value;
-        }
-        Ok(())
-    }
 }
 
 /// [`ClickHouseConfig`] 的链式构建器。
@@ -326,139 +224,6 @@ impl ClickHouseConfig {
 #[derive(Clone, Debug)]
 pub struct ClickHouseConfigBuilder {
     inner: ClickHouseConfig,
-}
-
-impl Default for ClickHouseConfigBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ClickHouseConfigBuilder {
-    /// 从默认值开始。
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            inner: ClickHouseConfig::default(),
-        }
-    }
-
-    /// 从已有配置开始（便于在既有配置上覆盖少量字段）。
-    #[must_use]
-    pub fn from_config(config: ClickHouseConfig) -> Self {
-        Self { inner: config }
-    }
-
-    /// 设置主机名或 IP。
-    #[must_use]
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.inner.host = host.into();
-        self
-    }
-
-    /// 设置 HTTP 端口。
-    #[must_use]
-    pub fn http_port(mut self, port: u16) -> Self {
-        self.inner.http_port = port;
-        self
-    }
-
-    /// 设置是否启用 HTTPS。
-    #[must_use]
-    pub fn tls(mut self, enabled: bool) -> Self {
-        self.inner.tls = enabled;
-        self
-    }
-
-    /// 设置 PEM CA 文件路径。
-    #[must_use]
-    pub fn tls_ca_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.inner.tls_ca_file = Some(path.into());
-        self
-    }
-
-    /// 设置 mTLS 客户端证书路径。
-    #[must_use]
-    pub fn tls_client_cert_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.inner.tls_client_cert_file = Some(path.into());
-        self
-    }
-
-    /// 设置 mTLS 客户端私钥路径。
-    #[must_use]
-    pub fn tls_client_key_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.inner.tls_client_key_file = Some(path.into());
-        self
-    }
-
-    /// 设置用户名。
-    #[must_use]
-    pub fn user(mut self, user: impl Into<String>) -> Self {
-        self.inner.user = user.into();
-        self
-    }
-
-    /// 设置密码；密码不会出现在 `Debug` 输出中。
-    #[must_use]
-    pub fn password(mut self, password: impl Into<String>) -> Self {
-        self.inner.password = password.into();
-        self
-    }
-
-    /// 设置默认数据库。
-    #[must_use]
-    pub fn database(mut self, database: impl Into<String>) -> Self {
-        self.inner.database = database.into();
-        self
-    }
-
-    /// 设置请求超时。
-    #[must_use]
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.inner.timeout = timeout;
-        self
-    }
-
-    /// 设置连接（TCP/TLS 握手）超时。
-    #[must_use]
-    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
-        self.inner.connect_timeout = Some(timeout);
-        self
-    }
-
-    /// 设置每主机最大空闲连接数。
-    #[must_use]
-    pub fn max_idle_per_host(mut self, max_idle_per_host: usize) -> Self {
-        self.inner.max_idle_per_host = max_idle_per_host;
-        self
-    }
-
-    /// 设置全局 in-flight 上限。
-    #[must_use]
-    pub fn max_in_flight(mut self, max_in_flight: usize) -> Self {
-        self.inner.max_in_flight = max_in_flight;
-        self
-    }
-
-    /// 设置获取 in-flight 许可的超时。
-    #[must_use]
-    pub fn acquire_timeout(mut self, timeout: Duration) -> Self {
-        self.inner.acquire_timeout = timeout;
-        self
-    }
-
-    /// 设置是否通过 URL 查询参数传递凭据。
-    #[must_use]
-    pub fn auth_in_url(mut self, enabled: bool) -> Self {
-        self.inner.auth_in_url = enabled;
-        self
-    }
-
-    /// 校验并产出配置。
-    pub fn build(self) -> ClickHouseResult<ClickHouseConfig> {
-        self.inner.validate()?;
-        Ok(self.inner)
-    }
 }
 
 /// TOML 中 `timeout_ms` / `acquire_timeout_ms`（毫秒）的解析器。
@@ -479,97 +244,16 @@ where
     Ok(millis.map(Duration::from_millis))
 }
 
-/// 读取非空环境变量（不做 trim）。
-fn env_non_empty(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
-/// 读取 trim 后非空的环境变量。
-fn env_trimmed(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-/// 读取并解析环境变量；解析失败只报告变量名，不回显取值。
-fn env_parsed<T>(name: &str) -> ClickHouseResult<Option<T>>
-where
-    T: std::str::FromStr,
-{
-    match std::env::var(name) {
-        Ok(value) => value
-            .trim()
-            .parse::<T>()
-            .map(Some)
-            .map_err(|_| ClickHouseError::Config(format!("环境变量 {name} 取值非法"))),
-        Err(_) => Ok(None),
-    }
-}
-
-/// 读取布尔型环境变量，兼容 `1/0`、`true/false`、`yes/no`、`on/off`。
-fn env_bool(name: &str) -> ClickHouseResult<Option<bool>> {
-    let Some(value) = env_trimmed(name) else {
-        return Ok(None);
-    };
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(Some(true)),
-        "0" | "false" | "no" | "off" => Ok(Some(false)),
-        _ => Err(ClickHouseError::Config(format!("环境变量 {name} 取值非法"))),
-    }
-}
-
-/// 解析 `HTTP_PORT` / `PORT` 两个变量，值冲突时 fail-closed。
-fn resolve_http_port(
-    http_port: Option<u16>,
-    port_alias: Option<u16>,
-    default: u16,
-) -> ClickHouseResult<u16> {
-    match (http_port, port_alias) {
-        (Some(primary), Some(alias)) if primary != alias => Err(ClickHouseError::Config(format!(
-            "{ENV_HTTP_PORT} 与 {ENV_PORT} 取值冲突"
-        ))),
-        (Some(primary), _) => Ok(primary),
-        (None, Some(alias)) => Ok(alias),
-        (None, None) => Ok(default),
-    }
-}
-
-/// 判断主机名是否为 loopback（`localhost` 或环回 IP）。
-fn host_is_loopback(host: &str) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(host);
-    host.eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback())
-}
-
-/// 非 loopback 明文 HTTP 的显式放行名单。
-fn host_allows_plain_http(host: &str) -> bool {
-    host_allows_plain_http_with_list(host, std::env::var(ENV_PLAIN_HTTP_HOSTS).ok().as_deref())
-}
-
-/// [`host_allows_plain_http`] 的纯函数形式，供单元测试直接驱动。
-fn host_allows_plain_http_with_list(host: &str, list: Option<&str>) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(host);
-    list.is_some_and(|entries| {
-        entries
-            .split(',')
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .any(|entry| entry.eq_ignore_ascii_case(host))
-    })
-}
+mod builder;
+mod envvars;
+mod validate;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use super::envvars::{env_parsed, resolve_http_port};
+    use super::validate::host_allows_plain_http_with_list;
 
     fn toml(text: &str) -> ClickHouseResult<ClickHouseConfig> {
         ClickHouseConfig::from_toml(text)
