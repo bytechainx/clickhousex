@@ -8,6 +8,35 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-22
+
+### 变更
+
+- **内部结构改写（公开 API 与可观察契约均不变）**：按 `docs/module-rules.md` §5.5 的手法，把
+  `src/config.rs` 的三块职责下沉为 `src/config/` 子模块 —— 链式构建器实现
+  （`impl Default for ClickHouseConfigBuilder` + `impl ClickHouseConfigBuilder`）→
+  `src/config/builder.rs`（144 行）；环境变量加载层（`from_env`、`apply_env_overrides` 与
+  `env_non_empty` / `env_trimmed` / `env_parsed` / `env_bool` / `resolve_http_port`）→
+  `src/config/envvars.rs`（135 行）；配置校验（`validate`）与明文 HTTP 放行判定
+  （`host_is_loopback` / `host_allows_plain_http` / `host_allows_plain_http_with_list`）→
+  `src/config/validate.rs`（85 行）。门面 `src/config.rs` 保留模块文档、全部 `ENV_*` / `DEFAULT_*`
+  常量、`ClickHouseConfig` 与 `ClickHouseConfigBuilder` 的**类型定义与字段**、`Default` / `Debug`、
+  `from_toml` / `from_toml_file`（连同 `de_millis` / `de_optional_millis` 两个 serde 解析器）、
+  `builder` / `base_url` 与**原有内联测试**。
+  搬走的 15 个构建方法与 `validate` / `from_env` 原本就是 `pub`，故**公开路径与签名一字未改**；
+  只有被门面内联测试直接驱动的 `env_parsed` / `resolve_http_port` /
+  `host_allows_plain_http_with_list` 提为 `pub(super)`，其余辅助（`apply_env_overrides`、
+  `env_non_empty`、`env_trimmed`、`env_bool`、`host_is_loopback`、`host_allows_plain_http`）
+  **保持私有**。`de_millis` / `de_optional_millis` 留在门面，是因为 `#[serde(deserialize_with = …)]`
+  的路径按**结构体所在模块**解析，随结构体留在一起最稳。
+  子模块名用 `envvars` 而非 `env`，避免 edition 2018 的 uniform path 遮蔽 `std::env`
+  （与 `ossx` / `s3x` / `postgresx` 的处理一致）。
+  `src/config.rs` 生产段 **569 → 250** 行。
+  动机：`module-rules` 是元仓库必需检查，且它审计各仓**默认分支**，故当 `config.rs` 的生产段距
+  `MR-STRUCT-007` 的 800 行 ERROR 阈值只剩 231 行时，任一仓的任意改动都可能卡住元仓库的全部 PR。
+  属**纯搬移**（行多重集比对确认零代码行丢失，内联测试段除新增两条 `use` 外逐字节一致），
+  87 项测试与 2 项 doctest 结果不变。
+
 ## [0.1.2] - 2026-09-22
 
 ### 变更
