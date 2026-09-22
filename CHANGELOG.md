@@ -8,6 +8,26 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-22
+
+### 变更
+
+- **内部结构改写（公开 API 与可观察契约均不变）**：按 `docs/module-rules.md` §5.5 的手法，把
+  `src/client.rs` 的 `impl Inner` 整块（构造、背压获取、关闭等待与查询收发共 10 个方法）下沉为
+  `src/client/inner.rs`。门面 `src/client.rs` 保留模块文档、`BatchInsertOptions` /
+  `ClickHousePoolStats` / `ClickHouseHealth` / `ClickHouseClient` / `ClickHousePool` 的定义、
+  `Inner` 的**结构与字段**、`impl ClickHouseClient` / `impl ClickHousePool`、
+  `impl_connection_api!` 宏及其两次展开、两个 `Debug` 实现、三个公开纯函数
+  （`parse_tab_separated_rows` / `chunk_ranges` / `build_query_url`）与**原有内联测试**。
+  `Inner` 是私有结构，其方法原本就不可见于 crate 之外，故**公开路径与签名一字未改**；
+  门面与其宏实际调用的 7 个方法提为 `pub(super)`，只在子模块内使用的
+  `ensure_open` / `acquire` / `post_query_inner` **保持私有**。
+  子模块名 `inner` 取自它承载实现的那个类型名，与现有 `client/transport.rs` 并列。
+  `src/client.rs` 生产段 **577 → 393** 行，`src/client/inner.rs` 为 204 行。
+  动机：`module-rules` 是元仓库必需检查，且它审计各仓**默认分支**，故当 `client.rs` 的生产段距
+  `MR-STRUCT-007` 的 800 行 ERROR 阈值只剩 223 行时，任一仓的任意改动都可能卡住元仓库的全部 PR。
+  属**纯搬移**（行多重集比对确认零代码行丢失，内联测试段逐字节一致），87 项测试与 doctest 结果不变。
+
 ## [0.1.1] - 2026-09-22
 
 ### 新增
