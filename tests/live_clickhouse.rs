@@ -14,7 +14,7 @@
 //! ```text
 //! set -a; source /home/workspace/sre/secrets/env/clickhousex.env; set +a
 //! cd /home/workspace/bytechainx/clickhousex
-//! CARGO_TARGET_DIR=/home/workspace/bytechainx/.cargo-target \
+//! CARGO_TARGET_DIR=/home/workspace/bytechainx/.cargo/target \
 //!   cargo test --test live_clickhouse -- --ignored --test-threads=1
 //! ```
 
