@@ -174,13 +174,18 @@ macro_rules! impl_connection_api {
             }
 
             /// 执行查询并返回原始响应文本（ClickHouse 默认 `TabSeparated`）。
+            ///
+            /// 瞬时错误按 [`RetryConfig`](crate::RetryConfig) 自动重试；
+            /// 永久错误立即上抛。
             pub async fn query_text(&self, sql: &str) -> ClickHouseResult<String> {
-                self.inner.post_query(sql, None, &[]).await
+                self.inner.post_query_read(sql, &[]).await
             }
 
             /// 执行查询并按行返回结果（`TabSeparated`）。
+            ///
+            /// 重试语义同 [`query_text`](Self::query_text)。
             pub async fn query(&self, sql: &str) -> ClickHouseResult<Vec<Vec<String>>> {
-                let text = self.inner.post_query(sql, None, &[]).await?;
+                let text = self.inner.post_query_read(sql, &[]).await?;
                 Ok(parse_tab_separated_rows(&text))
             }
 
@@ -188,13 +193,15 @@ macro_rules! impl_connection_api {
             ///
             /// 参数以 `param_<name>=<value>` 形式传入，SQL 中用 `{name:Type}` 引用；
             /// 参数名必须是字母/数字/下划线组合。
+            ///
+            /// 重试语义同 [`query_text`](Self::query_text)。
             pub async fn query_with_params(
                 &self,
                 sql: &str,
                 params: &[(&str, &str)],
             ) -> ClickHouseResult<Vec<Vec<String>>> {
                 validate_params(params)?;
-                let text = self.inner.post_query(sql, None, params).await?;
+                let text = self.inner.post_query_read(sql, params).await?;
                 Ok(parse_tab_separated_rows(&text))
             }
 
@@ -662,7 +669,8 @@ mod tests {
             "error={error:?}"
         );
         assert!(error.is_retryable());
-        assert_eq!(client.stats().error, 1);
+        // ping 走只读重试路径：1 次首发 + 3 次重试（默认 RetryConfig）= 4 次失败计数
+        assert_eq!(client.stats().error, 4);
         assert_eq!(client.stats().ok, 0);
     }
 

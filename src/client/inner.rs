@@ -20,6 +20,7 @@ use super::transport::{
 use super::{ClickHouseHealth, ClickHousePoolStats, Inner};
 use crate::config::ClickHouseConfig;
 use crate::error::{ClickHouseError, ClickHouseResult};
+use crate::retry::execute_with_retry;
 
 impl Inner {
     pub(super) fn new(config: ClickHouseConfig, permits: usize) -> ClickHouseResult<Self> {
@@ -67,17 +68,26 @@ impl Inner {
     ///
     /// 新请求由 `closed` 位在 [`Inner::ensure_open`] 处立即拒绝，因此**不**关闭信号量：
     /// 在途操作各自持有 1 个额度、完成时释放，「取回全部额度」即等价于「在途操作已
-    /// 全部结束」。等待上界由在途请求自身的超时（`config.timeout`）隐式给出。
+    /// 全部结束」。等待上界理论上由在途请求自身的超时（`config.timeout`）隐式给出，
+    /// 此处再显式加 2×`config.timeout` 兜底——防止异常路径（如请求超时未生效）下
+    /// close 无限期阻塞（对抗审查 P1-2）。
+    ///
+    /// 兜底超时仍未取回全部额度时返回 [`ClickHouseError::Timeout`]；`closed` 位保持
+    /// 置位（新请求依旧被拒绝），调用方可稍后重试 close 或查 `stats().in_flight`。
     ///
     /// 幂等：无在途操作时立即返回，重复调用同样成功。
     pub(super) async fn close(&self) -> ClickHouseResult<()> {
         self.closed.store(true, Ordering::SeqCst);
         let permits = u32::try_from(self.total).unwrap_or(u32::MAX);
-        let all_permits = self
-            .sem
-            .clone()
-            .acquire_many_owned(permits)
+        let drain_deadline = self.config.timeout.saturating_mul(2);
+        let all_permits = timeout(drain_deadline, self.sem.clone().acquire_many_owned(permits))
             .await
+            .map_err(|_| {
+                ClickHouseError::Timeout(format!(
+                    "close 等待在途操作排空超时（{}ms）；closed 位已置位，可稍后重试或查 stats().in_flight",
+                    drain_deadline.as_millis()
+                ))
+            })?
             .map_err(|_| ClickHouseError::Closed("背压信号量已关闭".to_owned()))?;
         drop(all_permits);
         Ok(())
@@ -117,7 +127,7 @@ impl Inner {
     }
 
     pub(super) async fn ping(&self) -> ClickHouseResult<()> {
-        let body = self.post_query("SELECT 1", None, &[]).await?;
+        let body = self.post_query_read("SELECT 1", &[]).await?;
         if body.trim() != "1" {
             return Err(ClickHouseError::Backend(
                 "ping 响应不符合协议（响应正文已省略）".to_owned(),
@@ -131,7 +141,7 @@ impl Inner {
         let healthy = self.ping().await.is_ok();
         let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let version = if healthy {
-            self.post_query("SELECT version()", None, &[])
+            self.post_query_read("SELECT version()", &[])
                 .await
                 .ok()
                 .map(|text| text.trim().to_owned())
@@ -163,6 +173,26 @@ impl Inner {
             self.error.fetch_add(1, Ordering::Relaxed);
         }
         outcome
+    }
+
+    /// 只读查询路径：按 `config.retry` 的重试预算包装 `post_query`。
+    ///
+    /// 仅供 `query` / `query_text` / `query_with_params` 与 `ping` /
+    /// `health_check` 等读操作使用；写操作（`execute` / `insert_batch` 等）
+    /// **不**走本路径（R-RT-031：非幂等写默认不重试）。`enabled = false`
+    /// 时短路为单次执行，不消耗任何重试预算。
+    pub(super) async fn post_query_read(
+        &self,
+        sql: &str,
+        params: &[(&str, &str)],
+    ) -> ClickHouseResult<String> {
+        if !self.config.retry.enabled {
+            return self.post_query(sql, None, params).await;
+        }
+        execute_with_retry(&self.config.retry, "clickhouse.query", || {
+            self.post_query(sql, None, params)
+        })
+        .await
     }
 
     async fn post_query_inner(

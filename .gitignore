@@ -4,3 +4,5 @@
 Cargo.lock
 # graft 代码图谱缓存（可再生）
 /graft/
+# oh-my-claudecode 运行时产物
+.omc/

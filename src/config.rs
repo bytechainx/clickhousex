@@ -17,6 +17,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::error::{ClickHouseError, ClickHouseResult};
+use crate::retry::RetryConfig;
 
 /// 环境变量前缀。
 pub const ENV_PREFIX: &str = "FOUNDATIONX_CLICKHOUSEX_";
@@ -107,6 +108,12 @@ pub struct ClickHouseConfig {
     pub acquire_timeout: Duration,
     /// 认证方式：`false` 使用 `Authorization: Basic` 头，`true` 使用 URL 查询参数。
     pub auth_in_url: bool,
+    /// 重试配置（默认启用：3 次 / 100ms 起 / 5s 上限）。
+    ///
+    /// 仅对 `is_retryable() == true` 的错误生效；查询与连接类路径默认启用重试，
+    /// 写操作（`execute` / `insert_batch` 等）不经重试路径。
+    #[serde(skip)]
+    pub retry: RetryConfig,
 }
 
 impl Default for ClickHouseConfig {
@@ -127,6 +134,7 @@ impl Default for ClickHouseConfig {
             max_in_flight: 64,
             acquire_timeout: Duration::from_secs(5),
             auth_in_url: false,
+            retry: RetryConfig::default(),
         }
     }
 }
@@ -150,6 +158,7 @@ impl fmt::Debug for ClickHouseConfig {
             .field("max_in_flight", &self.max_in_flight)
             .field("acquire_timeout", &self.acquire_timeout)
             .field("auth_in_url", &self.auth_in_url)
+            .field("retry", &self.retry)
             .finish()
     }
 }

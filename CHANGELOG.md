@@ -8,6 +8,29 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **`close()` 增加排空超时兜底**（对抗审查 P1-2）：等待在途操作释放全部背压
+  额度时显式包裹 2×`timeout` 的截止时间，防止异常路径下 close 无限期阻塞；
+  超时返回 `ClickHouseError::Timeout`（`closed` 位保持置位，新请求依旧被拒绝，
+  调用方可稍后重试或查 `stats().in_flight`）。
+
+### 新增
+
+- **内置重试机制**（`RetryConfig`，对抗审查 P1-1）：此前 `is_retryable()` 已实现
+  但无任何重试路径，网络瞬断全部上抛、生产易误报故障。现在查询/只读路径
+  （`query` / `query_text` / `query_with_params` / `ping` / `health_check`）按
+  `ClickHouseConfig::retry` 自动重试：指数退避（initial 100ms、上限 5s）+ ±25%
+  抖动，默认 3 次，仅 `is_retryable() == true` 的错误消耗重试预算；永久错误
+  立即上抛。
+  - **写操作（`execute` / `insert_batch` / `insert_json_each_row`）默认不经重试
+    路径**（R-RT-031：非幂等写默认不重试）；调用方确认幂等后可显式包装。
+  - 配置入口：`ClickHouseConfigBuilder::retry()`；`#[serde(skip)]` 不进 TOML；
+    `validate()` 对非法重试配置 fail-fast（`max_retries` 硬上界 10、
+    `max_delay ≥ initial_delay`、启用时延迟非零）。
+  - **默认行为变化**：读路径由「不重试」变为「默认启用重试」；如需关闭，
+    配置 `RetryConfig { enabled: false, ..Default::default() }`。
+
 ## [0.1.3] - 2026-09-22
 
 ### 变更

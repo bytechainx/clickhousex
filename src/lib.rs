@@ -84,6 +84,7 @@
 mod client;
 mod config;
 mod error;
+mod retry;
 
 pub use client::{
     build_query_url, chunk_ranges, parse_tab_separated_rows, BatchInsertOptions, ClickHouseClient,
@@ -97,3 +98,4 @@ pub use config::{
     ENV_TLS_CLIENT_KEY_FILE, ENV_USER,
 };
 pub use error::{ClickHouseError, ClickHouseResult};
+pub use retry::RetryConfig;
