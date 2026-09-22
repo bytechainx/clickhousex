@@ -68,17 +68,26 @@ impl Inner {
     ///
     /// 新请求由 `closed` 位在 [`Inner::ensure_open`] 处立即拒绝，因此**不**关闭信号量：
     /// 在途操作各自持有 1 个额度、完成时释放，「取回全部额度」即等价于「在途操作已
-    /// 全部结束」。等待上界由在途请求自身的超时（`config.timeout`）隐式给出。
+    /// 全部结束」。等待上界理论上由在途请求自身的超时（`config.timeout`）隐式给出，
+    /// 此处再显式加 2×`config.timeout` 兜底——防止异常路径（如请求超时未生效）下
+    /// close 无限期阻塞（对抗审查 P1-2）。
+    ///
+    /// 兜底超时仍未取回全部额度时返回 [`ClickHouseError::Timeout`]；`closed` 位保持
+    /// 置位（新请求依旧被拒绝），调用方可稍后重试 close 或查 `stats().in_flight`。
     ///
     /// 幂等：无在途操作时立即返回，重复调用同样成功。
     pub(super) async fn close(&self) -> ClickHouseResult<()> {
         self.closed.store(true, Ordering::SeqCst);
         let permits = u32::try_from(self.total).unwrap_or(u32::MAX);
-        let all_permits = self
-            .sem
-            .clone()
-            .acquire_many_owned(permits)
+        let drain_deadline = self.config.timeout.saturating_mul(2);
+        let all_permits = timeout(drain_deadline, self.sem.clone().acquire_many_owned(permits))
             .await
+            .map_err(|_| {
+                ClickHouseError::Timeout(format!(
+                    "close 等待在途操作排空超时（{}ms）；closed 位已置位，可稍后重试或查 stats().in_flight",
+                    drain_deadline.as_millis()
+                ))
+            })?
             .map_err(|_| ClickHouseError::Closed("背压信号量已关闭".to_owned()))?;
         drop(all_permits);
         Ok(())

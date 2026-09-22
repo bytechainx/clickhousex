@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retry_disabled_still_calls_once() {
+    async fn enabled_flag_is_caller_gate_not_execute_with_retry() {
         let attempts = AtomicU32::new(0);
         let config = RetryConfig {
             max_retries: 5,
@@ -449,10 +449,12 @@ mod tests {
         })
         .await;
         let elapsed = started.elapsed();
-        // 至少经历两次退避（attempt 1: ~10ms jittered, attempt 2: ~20ms jittered）
+        // 至少经历两次退避（attempt 1: 10ms±25%, attempt 2: 20ms±25%），
+        // 理论下界 = 7.5 + 15 = 22.5ms；墙钟只会偏长不会偏短，收紧到 22ms
+        // 可捕获「少退避一次」的回归
         assert!(
-            elapsed >= Duration::from_millis(15), // 最小: 7.5+15ms
-            "退避总时长应 ≥ 15ms，实际 {elapsed:?}"
+            elapsed >= Duration::from_millis(22),
+            "退避总时长应 ≥ 22ms（两次退避的理论下界），实际 {elapsed:?}"
         );
     }
 

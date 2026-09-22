@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **`close()` 增加排空超时兜底**（对抗审查 P1-2）：等待在途操作释放全部背压
+  额度时显式包裹 2×`timeout` 的截止时间，防止异常路径下 close 无限期阻塞；
+  超时返回 `ClickHouseError::Timeout`（`closed` 位保持置位，新请求依旧被拒绝，
+  调用方可稍后重试或查 `stats().in_flight`）。
+
 ### 新增
 
 - **内置重试机制**（`RetryConfig`，对抗审查 P1-1）：此前 `is_retryable()` 已实现
