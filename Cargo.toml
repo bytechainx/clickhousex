@@ -54,3 +54,9 @@ panic = "deny"
 unreachable = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+[package.metadata.bytechainx]
+module_id = "clickhousex"
+owner = "bytechainx"
+role = "adapter"
+semantic_contract = "docs/标准.md"
