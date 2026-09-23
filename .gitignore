@@ -6,3 +6,5 @@ Cargo.lock
 /graft/
 # oh-my-claudecode 运行时产物
 .omc/
+# 日志文件（构建/测试/clippy/fmt，可再生）
+*.log
