@@ -13,8 +13,8 @@
 //! 组织规则 R-RT-031 要求非幂等写操作默认不重试。本 crate 在 [`super::Inner::post_query`]
 //! 层区分读写路径：`execute`、`insert_batch`、`insert_json_each_row` 等写操作不经重试；
 //! 仅 `query`、`query_text`、`query_with_params`、`ping`、`health_check`
-//! 等查询/连接类路径启用重试。调用方若确定写入具有幂等性，可通过
-//! [`RetryConfig::enabled`] 全局启用并自行承担重复写入风险。
+//! 等查询/连接类路径启用重试。[`RetryConfig::enabled`] 只开关读路径；写路径没有库内入口。
+//! 调用方若确定写入具有幂等性，须在库外自行编排并承担重复写入风险。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -55,8 +55,8 @@ pub struct RetryConfig {
     pub initial_delay: Duration,
     /// 单次退避上限（退避按指数增长但不会超过此值）。
     pub max_delay: Duration,
-    /// 是否启用重试。关闭后所有操作直接执行单次请求，
-    /// 可避免对非幂等写入的意外重试。
+    /// 是否启用**读路径**重试。关闭后读路径也单次请求。
+    /// 写路径本来就不走重试包装，本开关打不开写重试。
     pub enabled: bool,
 }
 

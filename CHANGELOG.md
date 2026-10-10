@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 文档
+
+- 文档对齐 `RetryConfig` 已实现语义：`docs/API.md` 公开面补 `RetryConfig`，读路径默认退避、写路径不重试；`docs/API.md` / `docs/标准.md` 版本号更正为 `0.1.3`；`CONTEXT.md` 澄清「不发请求」只适用于 `ClickHouseClient::new`，`ClickHousePool::connect` 返回前会 ping；`src/retry.rs` rustdoc 更正 `enabled` 只开关读路径。只改文档与注释，不改行为。
+
 ### 破坏性变更
 
 - MSRV 由 `1.85` 上调至 `1.88`：依赖链中的 `icu_* 2.3.0`（经 `idna_adapter`）要求

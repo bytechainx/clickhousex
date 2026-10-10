@@ -1,6 +1,6 @@
 # clickhousex 公开 API
 
-**版本 / 角色**：`clickhousex 0.1.0` · ClickHouse HTTP 客户端适配器（连接池 + 背压 + 批量写入 + 健康检查）
+**版本 / 角色**：`clickhousex 0.1.3` · ClickHouse HTTP 客户端适配器（连接池 + 背压 + 批量写入 + 健康检查）
 
 ## 公开消费面
 
@@ -13,6 +13,7 @@
 | `ClickHouseHealth` | 健康检查结果：`healthy` / `version` / `latency_ms` |
 | `BatchInsertOptions` | 批量写入分块：`max_rows_per_chunk` / `max_bytes_per_chunk` / `batch_size` |
 | `ClickHouseError` / `ClickHouseResult` | 统一错误类型（`#[non_exhaustive]`）与 `Result` 别名 |
+| `RetryConfig` | 读路径退避：`max_retries` / `initial_delay` / `max_delay` / `enabled`。`enabled` 只作用读路径；库内写路径不重试 |
 | `parse_tab_separated_rows` / `chunk_ranges` / `build_query_url` | 纯函数工具（便于复用与测试） |
 | `ENV_*` / `DEFAULT_*` 常量 | 环境变量名与默认值，避免硬编码字符串 |
 
@@ -60,6 +61,6 @@ pool.close().await?;
 - 只覆盖 ClickHouse HTTP 协议与连接生命周期；**不包含**领域模型、业务表结构、调度编排。
 - 查询返回 `Vec<Vec<String>>`（`TabSeparated` 文本），不做类型反序列化；类型转换由调用方处理。
 - `insert_batch` 的分块之间**不承诺原子性**：每个分块是一次独立 HTTP 请求，失败时已写入分块不回滚。
-- 不提供隐式重试或自动重连；是否重试由调用方按 `ClickHouseError::is_retryable()` 决定
+- 读路径（`query*` / `ping` / `health_check`）在 `RetryConfig.enabled`（默认 `true`）且 `is_retryable` 时自动退避；库内写路径（`execute` / `insert_*`）不重试。不提供自动重连。调用方可在库外自行编排写入重试。
   （网络 / IO / 超时 / HTTP 429 / 5xx / ClickHouse `159` 可重试；配置、参数、序列化、认证与业务错误不可重试）。
 - 不提供 native TCP 协议（9000 端口）支持，仅 HTTP（默认 8123）。
