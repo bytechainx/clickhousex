@@ -51,7 +51,7 @@ _Avoid_: 网络错误（网络只是成因之一，不能表达「重试是否�
 
 **健康检查**：返回 `ClickHouseHealth` 的显式可达性探测，失败时**不**返回 `Err`，而是以
 `healthy = false` 表达；它与构造解耦，构造成功不代表服务可达。
-_Avoid_: 建连（`connect` 只做校验与构造，不发请求）
+_Avoid_: 把「不发请求」套到 `ClickHousePool::connect`（那句只适用于 `ClickHouseClient::new`；Pool `connect` 返回前会 ping）
 
 **许可等待**（acquire）：为进入 in-flight 额度而做的等待，受 `acquire_timeout` 约束，超时
 返回可重试错误；它不是请求超时，也不代表服务端已经收到任何字节。
