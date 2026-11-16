@@ -72,6 +72,52 @@ let client = ClickHouseClient::new(ClickHouseConfig::from_env()?)?;
 client.ping().await?;
 ```
 
+## 错误处理与重试语义
+
+### 可重试矩阵
+
+是否重试统一由 `ClickHouseError::is_retryable()` 判定，`ClickHouseError` 的 10 个变体全量归类如下：
+
+- 可重试（4 个）：`Connection`、`Unavailable`、`Timeout`、`Io`。这类瞬时故障在重试预算内会按退避策略重新发起请求。
+- 不可重试（6 个）：`Config`、`Backend`、`Serialization`、`Invalid`、`Closed`、`Unsupported`。这类永久错误立即上抛，不消耗重试预算。
+
+### 退避公式与上限
+
+读路径重试采用指数退避，第 `attempt` 次重试前的延迟为：
+
+`delay = min(initial_delay * 2^(attempt-1), max_delay)`
+
+在此基础叠加 ±25% 随机抖动，避免多实例同步重试造成惊群。`max_retries` 合法范围 `0..=10`，默认 `3`，且首次尝试不计入重试次数；重试次数硬上界 `MAX_RETRIES = 10`，无法通过配置超过该值。默认退避起点 100ms、上限 5s。
+
+### 写路径不重试
+
+`execute` / `insert_batch` / `insert_json_each_row` 不重试：`RetryConfig::enabled` 只开关读路径（`query` / `query_text` / `query_with_params` / `ping` / `health_check`），写路径没有库内重试入口，该开关打不开写重试。`enabled = false` 时读路径退化为单次请求。调用方若确认写入幂等，须在库外自行编排重试并承担重复写入风险。
+
+### 示例
+
+```rust,no_run
+use std::time::Duration;
+use clickhousex::{ClickHouseConfig, ClickHouseError, RetryConfig};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // enabled 只开关读路径重试；写路径本就不重试
+    let retry = RetryConfig {
+        max_retries: 5, // 0..=10（MAX_RETRIES 硬上界），不含首次尝试
+        initial_delay: Duration::from_millis(100),
+        max_delay: Duration::from_secs(5),
+        enabled: true,
+    };
+    let _config = ClickHouseConfig::builder().retry(retry).build()?;
+
+    // 用 is_retryable() 判断某类错误是否值得在库外重试
+    let error = ClickHouseError::Connection("连接被拒绝".into());
+    if error.is_retryable() {
+        // 由调用方决定是否在库外重试
+    }
+    Ok(())
+}
+```
+
 ## 公开 API
 
 | 类型 / 函数 | 说明 |

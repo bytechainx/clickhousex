@@ -214,6 +214,8 @@ fn hit(kind: &'static str, id: &'static str) {
 }
 
 /// 清单自身良构：类别取值域合法、`(类别, id)` 不重复。
+// E2E_MANIFEST 长度编译期已知；此断言用于固化「清单非空」这一覆盖契约、防止后续误改清空，故有意保留。
+#[allow(clippy::const_is_empty)]
 fn assert_manifest_wellformed() {
     let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
     for (kind, id) in E2E_MANIFEST {
